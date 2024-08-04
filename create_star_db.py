@@ -1,23 +1,30 @@
-import time as time_module  # Rename the imported time module to avoid conflicts with the time variable
+from decimal import Decimal
+import time as time_module
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Numeric, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session
 from datetime import datetime, timedelta
 import random
+import os
+
 
 start_time = time_module.time()
 
+# Remove the existing database file if it exists
+if os.path.exists('star_schema.db'):
+    os.remove('star_schema.db')
 
 # Create a SQLite database
 engine = create_engine('sqlite:///star_schema.db', echo=False)
 Base = declarative_base()
 
 
-# Define the tables (as in the previous script)
+# Define the tables
 class DimProduct(Base):
     __tablename__ = 'dim_product'
     product_id = Column(Integer, primary_key=True)
     product_name = Column(String)
+    unit_price = Column(Numeric(10, 2))
 
 
 class DimTime(Base):
@@ -62,7 +69,6 @@ class FactReceiptPosition(Base):
     receipt_id = Column(Integer, ForeignKey('fact_receipt.receipt_id'), nullable=False)
     product_id = Column(Integer, ForeignKey('dim_product.product_id'), nullable=False)
     quantity = Column(Numeric(10, 2))
-    unit_price = Column(Numeric(10, 2))
     total_price = Column(Numeric(10, 2))
 
     receipt = relationship("FactReceipt")
@@ -80,9 +86,9 @@ data_gen_start = time_module.time()
 # Insert sample data
 # DimProduct
 products = [
-    DimProduct(product_name=name) for name in
-    ["Apple", "Banana", "Orange", "Milk", "Bread", "Cheese", "Eggs", "Cereal", "Coffee", "Tea",
-     "Chicken", "Beef", "Fish", "Rice", "Pasta", "Tomato", "Potato", "Onion", "Carrot", "Lettuce"]
+    DimProduct(product_name=name, unit_price=round(random.uniform(1, 20), 2))
+    for name in ["Apple", "Banana", "Orange", "Milk", "Bread", "Cheese", "Eggs", "Cereal", "Coffee", "Tea",
+                 "Chicken", "Beef", "Fish", "Rice", "Pasta", "Tomato", "Potato", "Onion", "Carrot", "Lettuce"]
 ]
 session.add_all(products)
 
@@ -112,20 +118,12 @@ session.commit()
 # FactReceipt
 receipts = []
 for i in range(1000):
-    time = random.choice(times)
+    random_time = random.choice(times)
     location = random.choice(locations)
-    total_amount = round(random.uniform(10, 200), 2)
-    tax_amount = round(total_amount * 0.1, 2)  # 10% tax
-    cash_given = round(total_amount + random.uniform(0, 20), 2)
-    change_given = round(cash_given - total_amount, 2)
 
     receipt = FactReceipt(
-        time_id=time.time_id,
+        time_id=random_time.time_id,
         location_id=location.location_id,
-        total_amount=total_amount,
-        cash_given=cash_given,
-        change_given=change_given,
-        tax_amount=tax_amount,
         cashier_name=f"Cashier {random.randint(1, 10)}"
     )
     receipts.append(receipt)
@@ -135,7 +133,7 @@ session.add_all(receipts)
 # Commit to get receipt IDs
 session.commit()
 
-# Now set the receipt_number based on the auto-generated receipt_id
+# Now set the receipt_number and transaction_number based on the auto-generated receipt_id
 for receipt in receipts:
     receipt.receipt_number = f"R{receipt.receipt_id:04d}"
     receipt.transaction_number = f"T{receipt.receipt_id:04d}"
@@ -151,12 +149,11 @@ insert_start = time_module.time()
 positions = []
 for receipt in receipts:
     num_items = random.randint(1, 5)  # 1 to 5 items per receipt
-    receipt_total = 0
+    receipt_total = Decimal('0.00')
     for _ in range(num_items):
         product = random.choice(products)
-        quantity = random.randint(1, 3)
-        unit_price = round(random.uniform(1, 20), 2)
-        total_price = round(quantity * unit_price, 2)
+        quantity = Decimal(str(random.randint(1, 3)))
+        total_price = quantity * Decimal(str(product.unit_price))
         receipt_total += total_price
 
         positions.append(
@@ -164,16 +161,16 @@ for receipt in receipts:
                 receipt_id=receipt.receipt_id,
                 product_id=product.product_id,
                 quantity=quantity,
-                unit_price=unit_price,
-                total_price=total_price
+                total_price=total_price.quantize(Decimal('0.01'))
             )
         )
 
     # Update the receipt's total amount
-    receipt.total_amount = round(receipt_total, 2)
-    receipt.tax_amount = round(receipt_total * 0.1, 2)
-    receipt.cash_given = round(receipt_total + receipt.tax_amount + random.uniform(0, 5), 2)
-    receipt.change_given = round(receipt.cash_given - (receipt_total + receipt.tax_amount), 2)
+    receipt.total_amount = receipt_total.quantize(Decimal('0.01'))
+    receipt.tax_amount = (receipt_total * Decimal('0.1')).quantize(Decimal('0.01'))
+    receipt.cash_given = (receipt_total + receipt.tax_amount + Decimal(str(random.uniform(0, 5)))).quantize(
+        Decimal('0.01'))
+    receipt.change_given = (receipt.cash_given - (receipt_total + receipt.tax_amount)).quantize(Decimal('0.01'))
 
 session.add_all(positions)
 
